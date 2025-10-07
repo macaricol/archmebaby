@@ -133,4 +133,91 @@ btrfs subvolume create /mnt/@home
 
 echo "Remounting subvolumes..."
 umount /mnt
-mount -o subvol=@ "$root_partition" /
+mount -o subvol=@ "$root_partition" /mnt
+mkdir -p /mnt/home
+mount -o subvol=@home "$root_partition" /mnt/home
+
+echo "Mounting EFI partition..."
+mount --mkdir "$efi_partition" /mnt/boot
+
+echo "Enabling swap..."
+swapon "$swap_partition"
+
+# 4. Install Base System
+
+echo "Installing base system packages..."
+pacstrap -K /mnt base linux linux-firmware grub efibootmgr nano networkmanager sudo
+
+# 5. Configure Filesystem Table (fstab)
+
+echo "Generating fstab..."
+genfstab -U /mnt >> /mnt/etc/fstab
+
+echo "Displaying fstab for verification..."
+cat /mnt/etc/fstab
+read -p "Please verify the fstab output. Press Enter to continue..."
+
+# 6. Chroot into the New System
+
+echo "Entering chroot environment..."
+arch-chroot /mnt /bin/bash << 'EOF'
+
+# 7. System Configuration
+
+echo "Setting time zone to Europe/Lisbon..."
+ln -sf /usr/share/zoneinfo/Europe/Lisbon /etc/localtime
+hwclock --systohc
+
+echo "Configuring locale..."
+echo "Please uncomment desired locales (e.g., pt_PT.UTF-8, en_US.UTF-8) in /etc/locale.gen."
+read -p "Press Enter to open nano..."
+nano /etc/locale.gen
+locale-gen
+
+echo "Creating /etc/locale.conf..."
+echo "LANG=pt_PT.UTF-8" > /etc/locale.conf
+echo "LC_MESSAGES=en_US.UTF-8" >> /etc/locale.conf
+
+echo "Setting console keyboard layout..."
+echo "KEYMAP=pt-latin9" > /etc/vconsole.conf
+
+echo "Setting hostname..."
+prompt_input "Enter the hostname (e.g., omega)" hostname
+echo "$hostname" > /etc/hostname
+
+echo "Setting root password..."
+prompt_password "Enter root password" root_password
+echo "root:$root_password" | chpasswd
+
+echo "Creating user..."
+prompt_input "Enter the username (e.g., ishmael)" username
+prompt_password "Enter password for $username" user_password
+useradd -m -G wheel -s /bin/bash "$username"
+echo "$username:$user_password" | chpasswd
+
+echo "Configuring sudo privileges for wheel group..."
+echo "Please uncomment the line '%wheel ALL=(ALL:ALL) ALL' in the sudoers file."
+read -p "Press Enter to open visudo..."
+EDITOR=nano visudo
+
+echo "Enabling NetworkManager..."
+systemctl enable NetworkManager
+
+# 8. Install and Configure GRUB
+
+echo "Installing GRUB for UEFI..."
+grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=GRUB
+grub-mkconfig -o /boot/grub/grub.cfg
+
+# Exit chroot
+exit
+EOF
+
+# 9. Exit and Unmount
+
+echo "Unmounting filesystems..."
+umount -R /mnt
+
+echo "Rebooting system..."
+read -p "Please remove the installation media after shutdown. Press Enter to reboot..."
+reboot
