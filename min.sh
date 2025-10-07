@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Interactive Arch Linux Installation Script
-# This script automates the Arch Linux installation process, prompting the user for necessary inputs such as disk, partitions, hostname, root password, username, and user password.
+# This script automates the Arch Linux installation process, prompting for disk, partitions, hostname, root password, username, and user password.
 # Run as root in the Arch Linux live ISO environment.
 
 # Exit on any error
@@ -159,9 +159,9 @@ read -p "Please verify the fstab output. Press Enter to continue..."
 
 # 6. Chroot into the New System
 
-echo "Entering chroot environment..."
+echo "Preparing chroot environment..."
 
-# Create a temporary script for chroot commands to handle interactive prompts
+# Create a temporary script for chroot commands
 cat > /mnt/tmp/chroot-script.sh << 'CHROOT_EOF'
 #!/bin/bash
 set -e
@@ -244,10 +244,23 @@ grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=GRUB
 grub-mkconfig -o /boot/grub/grub.cfg
 CHROOT_EOF
 
+# Verify the chroot script was created
+if [ ! -f /mnt/tmp/chroot-script.sh ]; then
+    echo "Error: Failed to create /mnt/tmp/chroot-script.sh. Check write permissions or disk space."
+    exit 1
+fi
+
 # Make the chroot script executable
 chmod +x /mnt/tmp/chroot-script.sh
 
+# Ensure /mnt/bin/bash exists
+if [ ! -f /mnt/bin/bash ]; then
+    echo "Error: /bin/bash not found in chroot environment. Base system may not be installed correctly."
+    exit 1
+fi
+
 # Run the chroot script interactively
+echo "Entering chroot environment..."
 arch-chroot /mnt /bin/bash /tmp/chroot-script.sh
 
 # Clean up the temporary script
