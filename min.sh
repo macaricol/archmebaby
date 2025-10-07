@@ -10,7 +10,7 @@ set -e
 # Function to check if running as root
 check_root() {
     if [ "$EUID" -ne 0 ]; then
-        echo "This script must be run as root. Please use sudo or switch to root."
+        echo "Error: This script must be run as root. Please use sudo or switch to root."
         exit 1
     fi
 }
@@ -22,7 +22,7 @@ prompt_input() {
     local input
     read -p "$prompt: " input
     if [ -z "$input" ]; then
-        echo "Input cannot be empty. Please try again."
+        echo "Error: Input cannot be empty. Please try again."
         prompt_input "$prompt" "$var_name"
     else
         eval "$var_name='$input'"
@@ -39,10 +39,10 @@ prompt_password() {
     read -s -p "Confirm $prompt: " pass2
     echo
     if [ "$pass1" != "$pass2" ]; then
-        echo "Passwords do not match. Please try again."
+        echo "Error: Passwords do not match. Please try again."
         prompt_password "$prompt" "$var_name"
     elif [ -z "$pass1" ]; then
-        echo "Password cannot be empty. Please try again."
+        echo "Error: Password cannot be empty. Please try again."
         prompt_password "$prompt" "$var_name"
     else
         eval "$var_name='$pass1'"
@@ -54,7 +54,7 @@ validate_partition() {
     local partition="$1"
     local description="$2"
     if [ ! -b "$partition" ]; then
-        echo "Invalid $description: $partition does not exist. Please check using 'fdisk -l' or 'lsblk'."
+        echo "Error: Invalid $description: $partition does not exist. Please check using 'fdisk -l' or 'lsblk'."
         exit 1
     fi
 }
@@ -73,7 +73,7 @@ echo "Verifying internet connection..."
 if ping -c 5 archlinux.org > /dev/null 2>&1; then
     echo "Internet connection is active."
 else
-    echo "No internet connection. Please configure your network and try again."
+    echo "Error: No internet connection. Please configure your network and try again."
     exit 1
 fi
 
@@ -82,7 +82,7 @@ if [ -d /sys/firmware/efi ]; then
     fw_size=$(cat /sys/firmware/efi/fw_platform_size 2>/dev/null || echo "unknown")
     echo "UEFI mode detected (platform size: $fw_size bits)."
 else
-    echo "BIOS mode detected. This script assumes UEFI. Exiting."
+    echo "Error: BIOS mode detected. This script assumes UEFI. Exiting."
     exit 1
 fi
 
@@ -161,44 +161,28 @@ read -p "Please verify the fstab output. Press Enter to continue..."
 
 echo "Preparing chroot environment..."
 
-# Create a temporary script for chroot commands
-cat > /mnt/tmp/chroot-script.sh << 'CHROOT_EOF'
-#!/bin/bash
+# Verify chroot prerequisites
+if [ ! -f /mnt/bin/bash ]; then
+    echo "Error: /mnt/bin/bash not found. Base system installation may have failed. Re-running pacstrap..."
+    pacstrap -K /mnt base
+fi
+
+# Ensure necessary mounts for chroot
+echo "Binding necessary filesystems for chroot..."
+mount --bind /dev /mnt/dev
+mount --bind /proc /mnt/proc
+mount --bind /sys /mnt/sys
+mount --bind /run /mnt/run
+
+# Prompt for hostname and passwords before chroot to store variables
+prompt_input "Enter the hostname (e.g., omega)" hostname
+prompt_password "Enter root password" root_password
+prompt_input "Enter the username (e.g., ishmael)" username
+prompt_password "Enter password for $username" user_password
+
+echo "Entering chroot environment..."
+arch-chroot /mnt /bin/bash << CHROOT_EOF
 set -e
-
-# Function to prompt for input (redefined for chroot)
-prompt_input() {
-    local prompt="$1"
-    local var_name="$2"
-    local input
-    read -p "$prompt: " input
-    if [ -z "$input" ]; then
-        echo "Input cannot be empty. Please try again."
-        prompt_input "$prompt" "$var_name"
-    else
-        eval "$var_name='$input'"
-    fi
-}
-
-# Function to prompt for password (redefined for chroot)
-prompt_password() {
-    local prompt="$1"
-    local var_name="$2"
-    local pass1 pass2
-    read -s -p "$prompt: " pass1
-    echo
-    read -s -p "Confirm $prompt: " pass2
-    echo
-    if [ "$pass1" != "$pass2" ]; then
-        echo "Passwords do not match. Please try again."
-        prompt_password "$prompt" "$var_name"
-    elif [ -z "$pass1" ]; then
-        echo "Password cannot be empty. Please try again."
-        prompt_password "$prompt" "$var_name"
-    else
-        eval "$var_name='$pass1'"
-    fi
-}
 
 echo "Setting time zone to Europe/Lisbon..."
 ln -sf /usr/share/zoneinfo/Europe/Lisbon /etc/localtime
@@ -218,16 +202,12 @@ echo "Setting console keyboard layout..."
 echo "KEYMAP=pt-latin9" > /etc/vconsole.conf
 
 echo "Setting hostname..."
-prompt_input "Enter the hostname (e.g., omega)" hostname
 echo "$hostname" > /etc/hostname
 
 echo "Setting root password..."
-prompt_password "Enter root password" root_password
 echo "root:$root_password" | chpasswd
 
 echo "Creating user..."
-prompt_input "Enter the username (e.g., ishmael)" username
-prompt_password "Enter password for $username" user_password
 useradd -m -G wheel -s /bin/bash "$username"
 echo "$username:$user_password" | chpasswd
 
@@ -244,31 +224,10 @@ grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=GRUB
 grub-mkconfig -o /boot/grub/grub.cfg
 CHROOT_EOF
 
-# Verify the chroot script was created
-if [ ! -f /mnt/tmp/chroot-script.sh ]; then
-    echo "Error: Failed to create /mnt/tmp/chroot-script.sh. Check write permissions or disk space."
-    exit 1
-fi
-
-# Make the chroot script executable
-chmod +x /mnt/tmp/chroot-script.sh
-
-# Ensure /mnt/bin/bash exists
-if [ ! -f /mnt/bin/bash ]; then
-    echo "Error: /bin/bash not found in chroot environment. Base system may not be installed correctly."
-    exit 1
-fi
-
-# Run the chroot script interactively
-echo "Entering chroot environment..."
-arch-chroot /mnt /bin/bash /tmp/chroot-script.sh
-
-# Clean up the temporary script
-rm /mnt/tmp/chroot-script.sh
-
 # 9. Exit and Unmount
 
 echo "Unmounting filesystems..."
+umount /mnt/dev /mnt/proc /mnt/sys /mnt/run
 umount -R /mnt
 
 echo "Rebooting system..."
