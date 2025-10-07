@@ -160,9 +160,45 @@ read -p "Please verify the fstab output. Press Enter to continue..."
 # 6. Chroot into the New System
 
 echo "Entering chroot environment..."
-arch-chroot /mnt /bin/bash << 'EOF'
 
-# 7. System Configuration
+# Create a temporary script for chroot commands to handle interactive prompts
+cat > /mnt/tmp/chroot-script.sh << 'CHROOT_EOF'
+#!/bin/bash
+set -e
+
+# Function to prompt for input (redefined for chroot)
+prompt_input() {
+    local prompt="$1"
+    local var_name="$2"
+    local input
+    read -p "$prompt: " input
+    if [ -z "$input" ]; then
+        echo "Input cannot be empty. Please try again."
+        prompt_input "$prompt" "$var_name"
+    else
+        eval "$var_name='$input'"
+    fi
+}
+
+# Function to prompt for password (redefined for chroot)
+prompt_password() {
+    local prompt="$1"
+    local var_name="$2"
+    local pass1 pass2
+    read -s -p "$prompt: " pass1
+    echo
+    read -s -p "Confirm $prompt: " pass2
+    echo
+    if [ "$pass1" != "$pass2" ]; then
+        echo "Passwords do not match. Please try again."
+        prompt_password "$prompt" "$var_name"
+    elif [ -z "$pass1" ]; then
+        echo "Password cannot be empty. Please try again."
+        prompt_password "$prompt" "$var_name"
+    else
+        eval "$var_name='$pass1'"
+    fi
+}
 
 echo "Setting time zone to Europe/Lisbon..."
 ln -sf /usr/share/zoneinfo/Europe/Lisbon /etc/localtime
@@ -203,15 +239,19 @@ EDITOR=nano visudo
 echo "Enabling NetworkManager..."
 systemctl enable NetworkManager
 
-# 8. Install and Configure GRUB
-
 echo "Installing GRUB for UEFI..."
 grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=GRUB
 grub-mkconfig -o /boot/grub/grub.cfg
+CHROOT_EOF
 
-# Exit chroot
-exit
-EOF
+# Make the chroot script executable
+chmod +x /mnt/tmp/chroot-script.sh
+
+# Run the chroot script interactively
+arch-chroot /mnt /bin/bash /tmp/chroot-script.sh
+
+# Clean up the temporary script
+rm /mnt/tmp/chroot-script.sh
 
 # 9. Exit and Unmount
 
