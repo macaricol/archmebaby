@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # Interactive Arch Linux Installation Script
-# This script automates the Arch Linux installation process, prompting the user only for necessary inputs.
-# Run this script as root in the Arch Linux live ISO environment.
+# This script automates the Arch Linux installation process, prompting the user for necessary inputs such as disk, partitions, hostname, root password, username, and user password.
+# Run as root in the Arch Linux live ISO environment.
 
 # Exit on any error
 set -e
@@ -26,6 +26,26 @@ prompt_input() {
         prompt_input "$prompt" "$var_name"
     else
         eval "$var_name='$input'"
+    fi
+}
+
+# Function to prompt for password securely
+prompt_password() {
+    local prompt="$1"
+    local var_name="$2"
+    local pass1 pass2
+    read -s -p "$prompt: " pass1
+    echo
+    read -s -p "Confirm $prompt: " pass2
+    echo
+    if [ "$pass1" != "$pass2" ]; then
+        echo "Passwords do not match. Please try again."
+        prompt_password "$prompt" "$var_name"
+    elif [ -z "$pass1" ]; then
+        echo "Password cannot be empty. Please try again."
+        prompt_password "$prompt" "$var_name"
+    else
+        eval "$var_name='$pass1'"
     fi
 }
 
@@ -113,126 +133,4 @@ btrfs subvolume create /mnt/@home
 
 echo "Remounting subvolumes..."
 umount /mnt
-mount -o subvol=@ "$root_partition" /mnt
-mkdir -p /mnt/home
-mount -o subvol=@home "$root_partition" /mnt/home
-
-echo "Mounting EFI partition..."
-mount --mkdir "$efi_partition" /mnt/boot
-
-echo "Enabling swap..."
-swapon "$swap_partition"
-
-# 4. Install Base System
-
-echo "Installing base system packages..."
-pacstrap -K /mnt base linux linux-firmware grub efibootmgr nano networkmanager sudo
-
-# 5. Configure Filesystem Table (fstab)
-
-echo "Generating fstab..."
-genfstab -U /mnt >> /mnt/etc/fstab
-
-echo "Displaying fstab for verification..."
-cat /mnt/etc/fstab
-read -p "Please verify the fstab output. Press Enter to continue..."
-
-# 6. Chroot into the New System
-
-echo "Entering chroot environment..."
-arch-chroot /mnt /bin/bash << 'EOF'
-
-# 7. System Configuration
-
-echo "Setting time zone to Europe/Lisbon..."
-ln -sf /usr/share/zoneinfo/Europe/Lisbon /etc/localtime
-hwclock --systohc
-
-echo "Configuring locale..."
-echo "Please uncomment desired locales (e.g., pt_PT.UTF-8, en_US.UTF-8) in /etc/locale.gen."
-read -p "Press Enter to open nano..."
-nano /etc/locale.gen
-locale-gen
-
-echo "Creating /etc/locale.conf..."
-echo "LANG=pt_PT.UTF-8" > /etc/locale.conf
-echo "LC_MESSAGES=en_US.UTF-8" >> /etc/locale.conf
-
-echo "Setting console keyboard layout..."
-echo "KEYMAP=pt-latin9" > /etc/vconsole.conf
-
-echo "Setting hostname..."
-prompt_input "Enter the hostname (e.g., omega)" hostname
-echo "$hostname" > /etc/hostname
-
-echo "Setting root password..."
-passwd
-
-echo "Creating user..."
-prompt_input "Enter the username (e.g., ishmael)" username
-useradd -m -G wheel -s /bin/bash "$username"
-echo "Setting password for $username..."
-passwd "$username"
-
-echo "Configuring sudo privileges for wheel group..."
-echo "Please uncomment the line '%wheel ALL=(ALL:ALL) ALL' in the sudoers file."
-read -p "Press Enter to open visudo..."
-EDITOR=nano visudo
-
-echo "Enabling NetworkManager..."
-systemctl enable NetworkManager
-
-# 8. Install and Configure GRUB
-
-echo "Installing GRUB for UEFI..."
-grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=GRUB
-grub-mkconfig -o /boot/grub/grub.cfg
-
-# Exit chroot
-exit
-EOF
-
-# 9. Exit and Unmount
-
-echo "Unmounting filesystems..."
-umount -R /mnt
-
-echo "Rebooting system..."
-read -p "Please remove the installation media after shutdown. Press Enter to reboot..."
-reboot
-
-# Note: The script pauses here as the system reboots. The following commands should be run after rebooting into the new system.
-
-# 10. Install Minimal KDE Plasma Desktop
-
-echo "Installing KDE Plasma desktop and SDDM..."
-sudo pacman -S plasma-desktop sddm
-echo "Select 'pipewire-jack' if prompted during installation."
-
-echo "Enabling SDDM to start on boot..."
-sudo systemctl enable sddm
-
-# 11. Install Additional Packages
-
-echo "Installing additional packages (alacritty, fastfetch)..."
-sudo pacman -S alacritty fastfetch
-
-# 12. Suppress GRUB Menu and Boot Messages
-
-echo "Configuring GRUB to hide menu and suppress boot messages..."
-sudo nano /etc/default/grub
-echo "Please ensure the following lines are added or modified in /etc/default/grub:"
-cat << 'GRUB_CONFIG' >> /etc/default/grub
-GRUB_TIMEOUT=0
-GRUB_TIMEOUT_STYLE=hidden
-GRUB_CMDLINE_LINUX_DEFAULT="quiet loglevel=3 rd.udev.log_level=3"
-GRUB_CONFIG
-echo "GRUB configuration updated. Please verify /etc/default/grub."
-read -p "Press Enter to continue..."
-
-echo "Updating GRUB configuration..."
-sudo grub-mkconfig -o /boot/grub/grub.cfg
-
-echo "Installation complete! Please reboot to use your new Arch Linux system."
-read -p "Press Enter to reboot..."
-reboot
+mount -o subvol=@ "$root_partition" /
